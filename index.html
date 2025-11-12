@@ -1,0 +1,639 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Dartboard Light State Machine (Real-Time)</title>
+    
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        /* Define the Inter font for a modern look */
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600;800&display=swap');
+        body { font-family: 'Inter', sans-serif; }
+
+        /* --- RADIAL/DARTBOARD CONTAINERS --- */
+        #radial-control {
+            position: relative;
+            width: 480px;
+            height: 480px;
+            margin: 2rem auto;
+            /* Added a subtle background for the board itself */
+            background: #18181b; 
+            border-radius: 50%;
+            box-shadow: 0 0 30px rgba(0,0,0,0.6), inset 0 0 15px rgba(0,0,0,0.5);
+            border: 8px solid #000;
+        }
+        /* Make it fluid for mobile */
+        @media (max-width: 640px) {
+            #radial-control {
+                width: 90vw;
+                height: 90vw;
+                max-width: 480px;
+                max-height: 480px;
+            }
+        }
+        
+        /* --- DARTBOARD VISUAL ELEMENTS (NEW) --- */
+        #dart-center {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            width: 50px;
+            height: 50px;
+            border-radius: 50%;
+            background: #dc2626; /* Red */
+            border: 3px solid #6b7280;
+            transform: translate(-50%, -50%);
+            z-index: 1;
+            box-shadow: 0 0 10px rgba(0,0,0,0.5);
+        }
+        /* Inner bull */
+        #dart-center::after {
+            content: '';
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            width: 25px;
+            height: 25px;
+            border-radius: 50%;
+            background: #1f2937;
+            border: 2px solid #6b7280;
+            transform: translate(-50%, -50%);
+        }
+
+        #double-ring, #triple-ring {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            border-radius: 50%;
+            border: 3px solid #6b7280; /* Spider color */
+            z-index: 1;
+        }
+        /* Sits just outside the buttons */
+        #double-ring {
+            width: 460px; /* 230px radius */
+            height: 460px;
+            margin-left: -230px;
+            margin-top: -230px;
+        }
+        /* Sits just inside the buttons */
+        #triple-ring {
+            width: 230px; /* 115px radius */
+            height: 230px;
+            margin-left: -115px;
+            margin-top: -115px;
+        }
+
+        #dart-spider {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            z-index: 2; /* Sits above rings/center, below buttons */
+        }
+
+        .spider-line {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            width: 480px; /* Full diameter */
+            height: 3px;
+            background: #9ca3af; /* Brighter spider */
+            margin-top: -1.5px;
+            margin-left: -240px;
+            transform-origin: 50% 50%;
+        }
+
+
+        /* --- LIGHT-BUTTON STYLING (MODIFIED) --- */
+        .light-button-base {
+            /* Positioning */
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform-origin: 50% 50%;
+
+            /* Pill Shape & Size */
+            width: 100px; 
+            height: 45px; 
+            margin-top: -22.5px; /* -half of height */
+            margin-left: -50px; /* -half of width */
+            border-radius: 50px; 
+
+            /* Button Properties */
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 0.8rem;
+            font-weight: 600;
+            
+            /* Transitions */
+            transition: background-color 0.2s, box-shadow 0.2s, transform 0.2s, border-color 0.2s;
+            box-shadow: 0 4px 10px rgba(0, 0, 0, 0.4);
+            
+            /* Z-INDEX: Ensure buttons are on top of spider/rings */
+            z-index: 10;
+        }
+        
+        .light-button-base:hover {
+            transform: scale(1.05); /* Apply scale to the base element */
+        }
+        .light-button-base:active {
+            transform: scale(0.95); /* Apply scale to the base element */
+        }
+
+        /* --- State-Specific Styles for Light-Buttons --- */
+        .light-on {
+            background-color: #ef4444; /* Red */
+            box-shadow: 0 0 10px #ef4444;
+            color: white;
+            border: 3px solid #b91c1c;
+        }
+        .light-off {
+            background-color: #374151; /* Dark Gray */
+            color: #9ca3af;
+            border: 3px solid #1f2937;
+        }
+        .permanently-off {
+            background-color: #1f2937; /* Very Dark */
+            color: #4b5563;
+            border: 3px solid #4b5563;
+        }
+        .light-flashing {
+            background-color: #fcd34d; /* Amber */
+            box-shadow: 0 0 20px #fcd34d;
+            color: #1f2937;
+            border: 3px solid #f59e0b;
+        }
+        
+        .flash-pulse {
+            background-color: #f97316; /* Orange pulse */
+            box-shadow: 0 0 30px #f97316;
+        }
+
+
+        /* Control Buttons (Reset, Cancel, etc.) */
+        .btn-control {
+            transition: background-color 0.15s, transform 0.15s;
+            box-shadow: 0 4px 10px rgba(0, 0, 0, 0.4);
+        }
+        .btn-control:hover {
+            transform: translateY(-2px);
+        }
+        .btn-control:active {
+            transform: translateY(0);
+        }
+
+    </style>
+</head>
+<body class="bg-gray-900 text-white min-h-screen p-4">
+
+    <div class="max-w-xl mx-auto space-y-6">
+        <h1 class="text-3xl font-extrabold text-center text-blue-400">Dartboard State Machine Control (10 Categories)</h1>
+        <p class="text-center text-gray-400 text-sm">Click a category once to Isolate/Flash, click again to confirm **PERMANENT OFF**. Clicking a new category during isolation will switch the selection.</p>
+
+        <!-- User/Status Box -->
+        <div id="status-box" class="rounded-xl bg-gray-800 p-3 shadow-xl border border-gray-700 space-y-2">
+            <p class="text-sm font-semibold text-gray-400">System Status:</p>
+            <p id="system-message" class="text-lg text-green-400">Initializing...</p>
+            <div class="text-xs text-gray-500 break-all pt-2 border-t border-gray-700">
+                Connected User ID: <span id="user-id-display">N/A</span>
+            </div>
+        </div>
+
+        
+        <!-- The light-buttons will be injected here by JavaScript -->
+        <div id="radial-control">
+            <!-- Background elements -->
+            <div id="double-ring"></div>
+            <div id="triple-ring"></div>
+            <div id="dart-spider"></div>
+            <div id="dart-center"></div>
+            
+            <!-- Buttons are added here by createDOM() -->
+        </div>
+
+
+        <!-- Updated Control Button Row -->
+        <div class="flex flex-col sm:flex-row justify-center gap-4 pt-8 max-w-lg mx-auto">
+            <button id="reset-btn" class="p-3 rounded-xl btn-control bg-red-600 hover:bg-red-700 text-white font-bold transition flex-grow">
+                <span class="text-lg">🔄 Reset System (All ON)</span>
+            </button>
+            <button id="cancel-btn" class="p-3 rounded-xl btn-control bg-orange-600 hover:bg-orange-700 text-white font-bold transition flex-grow">
+                <span class="text-lg">❌ Cancel Selection</span>
+            </button>
+            <button id="individual-on-btn" class="p-3 rounded-xl btn-control bg-blue-600 hover:bg-blue-700 text-white font-bold transition flex-grow">
+                <span class="text-lg">💡 Individual ON Mode</span>
+            </button>
+        </div>
+    </div>
+
+<script type="module">
+    // --- FIREBASE IMPORTS ---
+    import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
+    import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+    import { getFirestore, setDoc, doc, onSnapshot, getDoc, setLogLevel } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+
+    // --- FIREBASE GLOBALS ---
+    const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
+    const firebaseConfig = JSON.parse(typeof __firebase_config !== 'undefined' ? __firebase_config : '{}');
+    const initialAuthToken = typeof __initial_auth_token !== 'undefined' ? __initial_auth_token : null;
+
+    let app;
+    let db;
+    let auth;
+    let userId = 'N/A';
+    let dbReady = false;
+
+    // Firestore Path
+    const DB_PATH = `artifacts/${appId}/public/data/dartboard`;
+    const DOC_REF = 'state';
+
+    // --- STATE DEFINITIONS ---
+    const LIGHT_ON = 0;
+    const LIGHT_OFF = 1; // Temporarily off while another light is selected
+    const LIGHT_FLASHING = 2;
+    const PERMANENTLY_OFF = 3;
+
+    const NUM_LIGHTS = 10; 
+    const FLASH_INTERVAL = 400; 
+    const INDIVIDUAL_ON_TIMEOUT = 3000; 
+    const RADIAL_DISTANCE = 170; 
+
+    // --- CATEGORY NAMES ---
+    const CATEGORY_NAMES = [
+        "FACES", "PLACES", "SPORT", "SHOWBIZ", "AFFAIRS",
+        "HISTORY", "BOOKS", "WORDS", "BRITAIN", "SPELLING"
+    ];
+
+    // --- LOCAL STATE VARIABLES (Synced with Firestore) ---
+    let lightStates = new Array(NUM_LIGHTS).fill(LIGHT_ON);
+    let lightButtonTransforms = new Array(NUM_LIGHTS).fill("");
+    let selectedLight = -1; 
+    let isIndividualOnMode = false;
+    let individualOnModeTimer = 0;
+    let flashToggle = false; 
+
+    // --- DOM Elements ---
+    const radialControl = document.getElementById('radial-control');
+    const systemMessage = document.getElementById('system-message');
+    const userIdDisplay = document.getElementById('user-id-display');
+    const resetButton = document.getElementById('reset-btn');
+    const cancelButton = document.getElementById('cancel-btn'); 
+    const individualOnButton = document.getElementById('individual-on-btn');
+
+    // --- UTILITY FUNCTIONS ---
+
+    function getCategoryName(index) {
+        return CATEGORY_NAMES[index] || `Light ${index + 1}`;
+    }
+
+    function logMessage(message, colorClass = 'text-lg text-green-400') {
+        systemMessage.className = colorClass;
+        systemMessage.textContent = message;
+    }
+
+    // --- FIREBASE DATA MANAGEMENT ---
+    
+    /**
+     * Pushes the current local state to Firestore.
+     */
+    async function updateFirestoreState() {
+        if (!dbReady) return;
+        try {
+            const stateData = {
+                lightStates: lightStates,
+                selectedLight: selectedLight,
+                isIndividualOnMode: isIndividualOnMode
+            };
+            await setDoc(doc(db, DB_PATH, DOC_REF), stateData, { merge: false });
+            // console.debug("State updated in Firestore.");
+        } catch (error) {
+            console.error("Error writing document to Firestore:", error);
+            logMessage("Error synchronizing state.", 'text-lg text-red-500');
+        }
+    }
+
+    /**
+     * Initializes the state in Firestore if it doesn't exist.
+     */
+    async function initializeFirestoreState() {
+        if (!dbReady) return;
+        const stateRef = doc(db, DB_PATH, DOC_REF);
+        try {
+            const docSnap = await getDoc(stateRef);
+            if (!docSnap.exists()) {
+                // If document doesn't exist, initialize it with the default state
+                await updateFirestoreState();
+                logMessage("New state document created in Firestore.", 'text-lg text-green-500');
+            }
+        } catch (error) {
+            console.error("Error checking/initializing document:", error);
+        }
+    }
+
+    /**
+     * Starts listening for real-time updates from Firestore.
+     */
+    function startRealtimeListener() {
+        if (!dbReady) return;
+
+        const stateRef = doc(db, DB_PATH, DOC_REF);
+        
+        onSnapshot(stateRef, (docSnap) => {
+            if (docSnap.exists()) {
+                const data = docSnap.data();
+                
+                // Only update local state if the data structure is valid
+                if (Array.isArray(data.lightStates) && typeof data.selectedLight === 'number') {
+                    lightStates = data.lightStates;
+                    selectedLight = data.selectedLight;
+                    isIndividualOnMode = data.isIndividualOnMode || false; // Handle new field
+                    
+                    renderLightButtons();
+                    // Log the sync, but keep the current action message if it's more specific
+                    if (!systemMessage.textContent.includes('Selected:') && !systemMessage.textContent.includes('Error')) {
+                        logMessage("State successfully synchronized from cloud.", 'text-lg text-gray-500');
+                    }
+                } else {
+                    console.warn("Invalid data structure received from Firestore.");
+                }
+            } else {
+                console.warn("Firestore document does not exist. Re-initializing.");
+                initializeFirestoreState();
+            }
+        }, (error) => {
+            console.error("Firestore Listener Error:", error);
+            logMessage("Real-time connection lost.", 'text-lg text-red-500');
+        });
+    }
+
+
+    // --- CORE LOGIC FUNCTIONS ---
+    // All core logic functions now modify the local state and then call updateFirestoreState()
+
+    function resetSystem(initialSetup = false) {
+        lightStates.fill(LIGHT_ON);
+        selectedLight = -1;
+        isIndividualOnMode = false;
+        
+        if (!initialSetup) {
+            logMessage("System Reset: All 10 categories back to ON.", 'text-xl text-red-400');
+        } else {
+            logMessage("System Initialized. All categories are ON.", 'text-lg text-green-400');
+        }
+        
+        updateFirestoreState(); // Push change to the cloud
+        renderLightButtons(); // Update locally instantly
+    }
+    
+    function handleCancelSelection() {
+        if (selectedLight === -1) {
+            logMessage("No category is currently isolated or flashing to cancel.", 'text-base text-gray-500');
+            return;
+        }
+
+        const categoryName = getCategoryName(selectedLight);
+        selectedLight = -1; 
+
+        for (let i = 0; i < NUM_LIGHTS; i++) {
+            if (lightStates[i] === LIGHT_FLASHING || lightStates[i] === LIGHT_OFF) {
+                lightStates[i] = LIGHT_ON;
+            }
+        }
+
+        logMessage(`Selection of '${categoryName}' canceled. All active categories restored to ON.`, 'text-lg text-orange-400');
+        updateFirestoreState(); // Push change to the cloud
+        renderLightButtons();
+    }
+
+
+    function handleSelectButton(buttonIndex) {
+        const categoryName = getCategoryName(buttonIndex);
+
+        radialControl.style.pointerEvents = 'none';
+        setTimeout(() => radialControl.style.pointerEvents = 'auto', 100);
+
+        // Individual ON Mode logic
+        if (isIndividualOnMode) {
+            if (lightStates[buttonIndex] === PERMANENTLY_OFF) {
+                lightStates[buttonIndex] = LIGHT_ON;
+                logMessage(`'${categoryName}' category restored to ON state.`, 'text-lg text-blue-300');
+            } else {
+                logMessage(`'${categoryName}' is not PERMANENTLY_OFF. No change.`, 'text-base text-yellow-400');
+            }
+            isIndividualOnMode = false;
+            individualOnButton.classList.remove('ring-4', 'ring-blue-400', 'ring-offset-2', 'ring-offset-gray-900');
+            
+            updateFirestoreState(); // Push change
+            renderLightButtons(); 
+            return; 
+        } 
+        
+        // Block interaction if permanently off
+        if (lightStates[buttonIndex] === PERMANENTLY_OFF) {
+            logMessage(`'${categoryName}' is PERMANENTLY OFF. Press 'Individual ON Mode' first to reactivate it.`, 'text-base text-red-400');
+            return;
+        }
+
+        // State machine transitions:
+        if (selectedLight === buttonIndex) {
+            // Confirm Permanent Off
+            lightStates[buttonIndex] = PERMANENTLY_OFF;
+            selectedLight = -1; 
+            for (let i = 0; i < NUM_LIGHTS; i++) {
+                if (lightStates[i] === LIGHT_OFF) { 
+                    lightStates[i] = LIGHT_ON;
+                }
+            }
+            logMessage(`'${categoryName}' is now PERMANENTLY OFF. Isolation released.`, 'text-lg text-red-500');
+
+        } else if (selectedLight !== -1 && selectedLight !== buttonIndex) {
+            // Switch selection
+            const oldCategoryName = getCategoryName(selectedLight);
+            for (let i = 0; i < NUM_LIGHTS; i++) {
+                if (lightStates[i] === LIGHT_FLASHING || lightStates[i] === LIGHT_OFF) {
+                    if (lightStates[i] !== PERMANENTLY_OFF) {
+                        lightStates[i] = LIGHT_ON;
+                    }
+                }
+            }
+            lightStates[buttonIndex] = LIGHT_FLASHING;
+            selectedLight = buttonIndex;
+            for (let i = 0; i < NUM_LIGHTS; i++) {
+                if (i !== buttonIndex && lightStates[i] === LIGHT_ON) {
+                    lightStates[i] = LIGHT_OFF;
+                }
+            }
+            logMessage(`Switched from '${oldCategoryName}' to '${categoryName}'. Flashing.`, 'text-xl text-yellow-400');
+
+        } else if (selectedLight === -1) {
+            // Initial selection/isolation
+            lightStates[buttonIndex] = LIGHT_FLASHING;
+            selectedLight = buttonIndex;
+            for (let i = 0; i < NUM_LIGHTS; i++) {
+                if (i !== buttonIndex && lightStates[i] === LIGHT_ON) {
+                    lightStates[i] = LIGHT_OFF;
+                }
+            }
+            logMessage(`Selected: '${categoryName}'. All others temporarily OFF. Flashing.`, 'text-xl text-yellow-400');
+        }
+
+        updateFirestoreState(); // Push change
+        renderLightButtons();
+    }
+
+    function handleIndividualOnButton() {
+        if (!isIndividualOnMode) {
+            isIndividualOnMode = true;
+            individualOnModeTimer = Date.now();
+            individualOnButton.classList.add('ring-4', 'ring-blue-400', 'ring-offset-2', 'ring-offset-gray-900');
+            logMessage("Individual ON Mode ACTIVATED. Press a category to reactivate (3s timeout).", 'text-lg text-blue-400');
+        } else {
+            isIndividualOnMode = false;
+            individualOnButton.classList.remove('ring-4', 'ring-blue-400', 'ring-offset-2', 'ring-offset-gray-900');
+            logMessage("Individual ON Mode DEACTIVATED.", 'text-lg text-gray-400');
+        }
+        updateFirestoreState(); // Push change
+    }
+
+    // --- RENDERING AND SETUP ---
+
+    function createDOM() {
+        // --- Create Spider Lines ---
+        const spiderContainer = document.getElementById('dart-spider');
+        // 5 lines, rotated 36 degrees apart, create 10 segments
+        for (let i = 0; i < 5; i++) {
+            const line = document.createElement('div');
+            line.classList.add('spider-line');
+            line.style.transform = `rotate(${i * 36}deg)`;
+            spiderContainer.appendChild(line);
+        }
+        // --- End of new code ---
+
+        for (let i = 0; i < NUM_LIGHTS; i++) {
+            const categoryName = getCategoryName(i);
+
+            // 1. Create Light Button Element
+            const lightButton = document.createElement('button');
+            lightButton.id = `light-btn-${i}`;
+            lightButton.classList.add('light-button-base');
+            lightButton.textContent = categoryName;
+            lightButton.onclick = () => handleSelectButton(i);
+
+            // 2. Calculate and apply radial transform
+            const angle = -90 + i * (360 / NUM_LIGHTS); 
+            const transform = `rotate(${angle}deg) translateX(${RADIAL_DISTANCE}px) rotate(${-angle}deg)`;
+            
+            lightButton.style.transform = transform;
+            lightButtonTransforms[i] = transform; // Store for later use
+
+            // 3. Append to the main control container
+            radialControl.appendChild(lightButton);
+        }
+
+        // Attach special button handlers
+        resetButton.onclick = () => resetSystem(false);
+        cancelButton.onclick = handleCancelSelection; 
+        individualOnButton.onclick = handleIndividualOnButton;
+    }
+
+    function renderLightButtons() {
+        for (let i = 0; i < NUM_LIGHTS; i++) {
+            const lightButton = document.getElementById(`light-btn-${i}`);
+            
+            lightButton.classList.remove('light-on', 'light-off', 'light-flashing', 'permanently-off', 'flash-pulse');
+            lightButton.style.transform = lightButtonTransforms[i];
+
+            switch (lightStates[i]) {
+                case LIGHT_ON:
+                    lightButton.classList.add('light-on');
+                    break;
+                case LIGHT_OFF:
+                    lightButton.classList.add('light-off');
+                    break;
+                case LIGHT_FLASHING:
+                    lightButton.classList.add('light-flashing');
+                    break;
+                case PERMANENTLY_OFF:
+                    lightButton.classList.add('permanently-off');
+                    break;
+            }
+        }
+    }
+
+    // Main non-blocking loop for flashing and timeout checks
+    function flashLoop() {
+        if (selectedLight !== -1 && lightStates[selectedLight] === LIGHT_FLASHING) {
+            flashToggle = !flashToggle;
+            const flashingLightButton = document.getElementById(`light-btn-${selectedLight}`);
+            const baseTransform = lightButtonTransforms[selectedLight];
+
+            if (flashToggle) {
+                flashingLightButton.classList.add('flash-pulse');
+                flashingLightButton.style.transform = `${baseTransform} scale(1.1)`;
+            } else {
+                flashingLightButton.classList.remove('flash-pulse');
+                flashingLightButton.style.transform = baseTransform;
+            }
+        }
+
+        if (isIndividualOnMode && Date.now() - individualOnModeTimer > INDIVIDUAL_ON_TIMEOUT) {
+            isIndividualOnMode = false;
+            individualOnButton.classList.remove('ring-4', 'ring-blue-400', 'ring-offset-2', 'ring-offset-gray-900');
+            logMessage("Individual ON Mode timed out. Saving state.", 'text-base text-gray-500');
+            updateFirestoreState(); // Ensure state is saved after timeout
+        }
+    }
+
+    // --- INITIALIZATION ---
+
+    async function initDartboardApp() { // Renamed from initializeApp
+        // 1. Firebase Init & Auth
+        try {
+            setLogLevel('debug');
+            app = initializeApp(firebaseConfig);
+            db = getFirestore(app);
+            auth = getAuth(app);
+            
+            if (initialAuthToken) {
+                await signInWithCustomToken(auth, initialAuthToken);
+            } else {
+                await signInAnonymously(auth);
+            }
+
+            onAuthStateChanged(auth, (user) => {
+                if (user) {
+                    userId = user.uid;
+                    dbReady = true;
+                    userIdDisplay.textContent = userId;
+                    logMessage(`Authentication successful. User ID: ${userId}`, 'text-lg text-green-400');
+                    
+                    // 2. Initialize DOM elements
+                    createDOM();
+                    
+                    // 3. Initialize Firestore and start real-time sync
+                    initializeFirestoreState();
+                    startRealtimeListener();
+
+                    // 4. Start the flashing loop
+                    setInterval(flashLoop, FLASH_INTERVAL);
+                } else {
+                    logMessage("Authentication failed. Cannot connect to database.", 'text-lg text-red-500');
+                    dbReady = false;
+                }
+            });
+
+        } catch (error) {
+            console.error("Firebase Initialization Error:", error);
+            logMessage("System error during initialization.", 'text-lg text-red-500');
+        }
+    }
+
+    window.onload = initDartboardApp; // Renamed from initializeApp
+
+</script>
+</body>
+</html>
